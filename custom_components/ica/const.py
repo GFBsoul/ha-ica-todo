@@ -126,6 +126,8 @@ class IcaServices(StrEnum):
     # LOOKUP_BARCODE = "lookup_barcode"
     UPSERT_SHOPPING_LIST = "upsert_shopping_list"
     ADD_OFFERS_TO_SHOPPING_LIST = "add_offers_to_shopping_list"
+    CREATE_SHOPPING_LIST = "create_shopping_list"
+    DELETE_SHOPPING_LIST = "delete_shopping_list"
 
 
 class IcaEvents(StrEnum):

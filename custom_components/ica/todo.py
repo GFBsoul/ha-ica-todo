@@ -298,7 +298,7 @@ class IcaShoppingListEntity(CoordinatorEntity[IcaCoordinator], TodoListEntity):
 
                 items.append(
                     TodoItem(
-                        summary=task["productName"],
+                        summary=self._display_summary(task),
                         uid=task["offlineId"],
                         status=TodoItemStatus.COMPLETED
                         if task["isStrikedOver"]
@@ -311,6 +311,15 @@ class IcaShoppingListEntity(CoordinatorEntity[IcaCoordinator], TodoListEntity):
                 )
         self._attr_todo_items = items
         super()._handle_coordinator_update()
+
+    def _display_summary(self, task) -> str:
+        """'2 st Gurka' style summary, so the quantity from ICA is visible in HA."""
+        name = task.get("productName") or ""
+        quantity = task.get("quantity")
+        if not quantity:
+            return name
+        parts = [self.coordinator.format_quantity(quantity), task.get("unit") or "", name]
+        return " ".join(p for p in parts if p)
 
     def generate_item_description(self, item: TodoItem):
         if not item:
@@ -538,16 +547,25 @@ class IcaShoppingListEntity(CoordinatorEntity[IcaCoordinator], TodoListEntity):
         _LOGGER.info("Built sync: %s", sync)
         return sync
 
+    def _changed_row(self, item: TodoItem) -> IcaShoppingListEntry:
+        """Build a changed row; the summary shown in HA includes quantity/unit, so parse it back."""
+        ti = self.coordinator.parse_summary(item.summary)
+        row = IcaShoppingListEntry(
+            offlineId=item.uid,
+            isStrikedOver=item.status == TodoItemStatus.COMPLETED,
+            productName=ti["productName"],
+        )
+        # Always send quantity/unit so a rename can also clear them
+        row["quantity"] = ti.get("quantity")
+        row["unit"] = ti.get("unit")
+        return row
+
     async def async_update_todo_item(self, item: TodoItem) -> None:
         """Update a To-do item."""
         sync = IcaShoppingListSync(
             offlineId=self._project_id,
             changedRows=[
-                IcaShoppingListEntry(
-                    offlineId=item.uid,
-                    isStrikedOver=item.status == TodoItemStatus.COMPLETED,
-                    productName=item.summary,
-                )
+                self._changed_row(item)
             ],
         )
 

@@ -177,9 +177,12 @@ class IcaAPI:
             "rows": [],
             "latestChange": f"{datetime.utcnow().replace(microsecond=0).isoformat()}Z",
         }
-        post(self._session, url, self._auth_key, data)
-        # list_id = response["id"]
-        return self.get_shopping_list(offline_id)
+        response = post(self._session, url, self._auth_key, data)
+        try:
+            return self.get_shopping_list(offline_id)
+        except Exception:  # pylint: disable=broad-except
+            # The list may not be readable immediately after creation
+            return response
 
     def sync_shopping_list(self, data: IcaShoppingListSync) -> IcaShoppingList:
         url = str.format(get_rest_url(MY_LIST_SYNC_ENDPOINT), data["offlineId"])

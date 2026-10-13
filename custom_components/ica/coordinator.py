@@ -140,12 +140,34 @@ class IcaCoordinator(DataUpdateCoordinator[list[IcaShoppingListEntry]]):
         if not (list_ids := self._config_entry.data.get(CONF_SHOPPING_LISTS, [])):
             return None
         lists: list[IcaShoppingList] = []
+        missing: list[str] = []
         for offline_id in list_ids:
             if not offline_id:
                 continue
-            shopping_list = await self.api.get_shopping_list(offline_id)
+            try:
+                shopping_list = await self.api.get_shopping_list(offline_id)
+            except requests.exceptions.HTTPError as err:
+                if err.response is not None and err.response.status_code == 404:
+                    # List was deleted (e.g. in the ICA app) - stop tracking it instead of failing setup
+                    _LOGGER.warning(
+                        "Tracked shopping list %s no longer exists, untracking it",
+                        offline_id,
+                    )
+                    missing.append(offline_id)
+                    continue
+                raise
             if shopping_list:
                 lists.append(shopping_list)
+        if missing:
+            entry_data = self._config_entry.data.copy()
+            entry_data[CONF_SHOPPING_LISTS] = [
+                x
+                for x in (entry_data.get(CONF_SHOPPING_LISTS, []) or [])
+                if x not in missing
+            ]
+            self._hass.config_entries.async_update_entry(
+                self._config_entry, data=entry_data
+            )
         return lists
 
     def get_shopping_list(self, list_offline_id) -> IcaShoppingList | None:
@@ -195,32 +217,50 @@ class IcaCoordinator(DataUpdateCoordinator[list[IcaShoppingListEntry]]):
         # }
         # return articleGroups.get(str.lower(productName), DEFAULT_ARTICLE_GROUP_ID)
 
+    _SUMMARY_RE = re.compile(
+        r"^(?:(?P<min_quantity>\d+(?:[.,]\d+)?)\s*[-–]\s*)?"
+        r"(?P<quantity>\d+(?:[.,]\d+)?)\s*"
+        r"(?:(?P<unit>st|förp|kg|hg|g|l|dl|cl|ml|msk|tsk|krm)(?=\s|$))?\s*"
+        r"(?P<name>.*\S)\s*$",
+        re.IGNORECASE,
+    )
+
+    @staticmethod
+    def format_quantity(quantity) -> str:
+        """Format a quantity the Swedish way: 2 -> '2', 1.5 -> '1,5'."""
+        try:
+            q = float(quantity)
+        except (TypeError, ValueError):
+            return str(quantity)
+        return str(int(q)) if q.is_integer() else f"{q:g}".replace(".", ",")
+
     def parse_summary(self, summary):
-        r = re.search(
-            # r"^(?P<min_quantity>\d-)?(?P<quantity>[0-9,.]*)? ?(?P<unit>st|förp|kg|hg|g|l|dl|cl|ml|msk|tsk|krm)? ?(?P<name>.+)$",       v2
-            r"^(?P<a>((?P<min_quantity>\d-)?(?P<quantity>[0-9,.]*)? )|(?P<b>))(?P<unit>st|förp|kg|hg|g|l|dl|cl|ml|msk|tsk|krm)? ?(?P<name>.+)$",
-            summary,
-        )
-        quantity = r["quantity"]
-        unit = r["unit"]
-        productName = r["name"] or summary
-        articleGroupId = self.get_article_group(productName)
+        """Split e.g. '2 gula lökar', '500 g nötfärs' or '1,5 l mjölk' into quantity/unit/name.
 
-        ti = {"summary": summary, "productName": productName}
-        if unit:
-            ti["unit"] = unit
-        if quantity:
-            ti["quantity"] = quantity
-        if unit:
-            ti["unit"] = unit
-        if articleGroupId:
+        - A unit only matches as a whole word ('1 gurka' is not '1 g urka').
+        - The quantity is sent to ICA as a number (ICA rejects strings like '1,5').
+        - Text without a leading number is kept as is.
+        """
+        summary = (summary or "").strip()
+        ti = {"summary": summary, "productName": summary}
+        r = self._SUMMARY_RE.match(summary)
+        if r and r["name"]:
+            try:
+                quantity = float(r["quantity"].replace(",", "."))
+            except (TypeError, ValueError):
+                quantity = None
+            if quantity is not None and quantity > 0:
+                unit = r["unit"].lower() if r["unit"] else None
+                ti["productName"] = r["name"]
+                ti["quantity"] = quantity
+                if unit:
+                    ti["unit"] = unit
+                ti["summary"] = " ".join(
+                    x for x in (self.format_quantity(quantity), unit, r["name"]) if x
+                )
+
+        if articleGroupId := self.get_article_group(ti["productName"]):
             ti["articleGroupId"] = articleGroupId
-
-        if ti.get("quantity"):
-            if ti.get("unit"):
-                ti["summary"] = f"{ti['quantity']} {ti['unit']} {productName}"
-            else:
-                ti["summary"] = f"{ti['quantity']} {productName}"
 
         _LOGGER.info("Parsed info from '%s' to %s", summary, ti)
         return ti
