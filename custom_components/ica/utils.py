@@ -501,3 +501,70 @@ if __name__ == "__main__":
     print(o)
     print(n)
     print(get_diffs(o, n))
+
+
+def resolve_list_entity_ids(
+    registry_entries, config_entry_id: str, offline_ids
+) -> dict[str, str]:
+    """Map shopping list offline IDs to todo entity IDs.
+
+    `registry_entries` is an iterable of `(unique_id, entity_id)` tuples. Matching is
+    case-insensitive since ICA returns offline IDs in upper case. Offline IDs without
+    a registered entity are omitted.
+    """
+    prefix = f"{config_entry_id}-"
+    by_offline_id = {
+        unique_id[len(prefix) :].casefold(): entity_id
+        for unique_id, entity_id in registry_entries
+        if unique_id.startswith(prefix)
+    }
+    return {
+        offline_id: by_offline_id[offline_id.casefold()]
+        for offline_id in offline_ids
+        if offline_id.casefold() in by_offline_id
+    }
+
+
+def build_lists_changed_event(
+    config_entry_id: str,
+    created: list[str] | None = None,
+    deleted: list[str] | None = None,
+    entities: dict[str, str] | None = None,
+) -> dict:
+    """Payload for the `ica_lists_changed` event."""
+    return {
+        "config_entry_id": config_entry_id,
+        "created": list(created or []),
+        "deleted": list(deleted or []),
+        "entities": dict(entities or {}),
+    }
+
+
+def diff_list_rows(old_rows, new_rows) -> dict[str, list]:
+    """Compare shopping list rows by `offlineId`.
+
+    Returns `added` ([{uid, summary}]), `removed` ([uid]) and `changed`
+    ([{uid, summary, changed_props}]). Empty when nothing differs.
+    """
+    old = {r["offlineId"]: r for r in old_rows or [] if r.get("offlineId")}
+    new = {r["offlineId"]: r for r in new_rows or [] if r.get("offlineId")}
+    added = [
+        {"uid": uid, "summary": row.get("productName")}
+        for uid, row in new.items()
+        if uid not in old
+    ]
+    removed = [uid for uid in old if uid not in new]
+    changed = []
+    for uid, row in new.items():
+        if uid not in old:
+            continue
+        props = [
+            k
+            for k in row
+            if k != "latestChange" and row.get(k) != old[uid].get(k)
+        ]
+        if props:
+            changed.append(
+                {"uid": uid, "summary": row.get("productName"), "changed_props": props}
+            )
+    return {"added": added, "removed": removed, "changed": changed}

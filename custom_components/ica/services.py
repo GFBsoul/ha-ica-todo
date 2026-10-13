@@ -9,8 +9,9 @@ import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers import entity_registry as er
 
 from .coordinator import IcaCoordinator
-from .const import CONF_DIRTY_CACHE, CONF_SHOPPING_LISTS, DOMAIN, IcaServices
+from .const import CONF_DIRTY_CACHE, CONF_SHOPPING_LISTS, DOMAIN, IcaEvents, IcaServices
 from .icatypes import IcaBaseItem, IcaRecipe, ServiceCallResponse
+from .utils import build_lists_changed_event, resolve_list_entity_ids
 
 import logging
 
@@ -51,6 +52,40 @@ LOOKUP_PRODUCT_SCHEMA = vol.Schema(
         vol.Required("identifier"): cv.string,
     }
 )
+
+
+def _fire_lists_changed(
+    hass: HomeAssistant,
+    config_entry_id: str,
+    created: list[str],
+    deleted: list[str],
+) -> None:
+    """Fire `ica_lists_changed` with the entity ids currently registered for the lists."""
+    registry = er.async_get(hass)
+    entries = [
+        (e.unique_id, e.entity_id)
+        for e in er.async_entries_for_config_entry(registry, config_entry_id)
+    ]
+    entities = resolve_list_entity_ids(entries, config_entry_id, created)
+    hass.bus.async_fire(
+        IcaEvents.LISTS_CHANGED,
+        build_lists_changed_event(config_entry_id, created, deleted, entities),
+    )
+
+
+async def _reload_and_fire_lists_changed(
+    hass: HomeAssistant,
+    config_entry_id: str,
+    created: list[str],
+    deleted: list[str],
+) -> None:
+    """Reload the config entry, then signal that the todo entities are registered."""
+    try:
+        await hass.config_entries.async_reload(config_entry_id)
+    except Exception:  # pylint: disable=broad-except
+        _LOGGER.exception("Reload of ICA config entry failed")
+    # Fire regardless, so listeners are not left waiting. `entities` shows what exists.
+    _fire_lists_changed(hass, config_entry_id, created, deleted)
 
 
 def setup_global_services(hass: HomeAssistant) -> None:
@@ -217,7 +252,14 @@ def setup_global_services(hass: HomeAssistant) -> None:
                         "Could not refresh shopping list cache before reload",
                         exc_info=True,
                     )
-                hass.config_entries.async_schedule_reload(config_entry.entry_id)
+                hass.async_create_background_task(
+                    _reload_and_fire_lists_changed(
+                        hass, config_entry.entry_id, [offline_id], []
+                    ),
+                    f"ica_lists_changed_{offline_id}",
+                )
+            else:
+                _fire_lists_changed(hass, config_entry.entry_id, [offline_id], [])
 
             return {
                 "success": True,
@@ -293,7 +335,12 @@ def setup_global_services(hass: HomeAssistant) -> None:
                     exc_info=True,
                 )
             registry.async_remove(entity_id)
-            hass.config_entries.async_schedule_reload(config_entry.entry_id)
+            hass.async_create_background_task(
+                _reload_and_fire_lists_changed(
+                    hass, config_entry.entry_id, [], [offline_id]
+                ),
+                f"ica_lists_changed_{offline_id}",
+            )
 
             return {"success": True, "entity_id": entity_id, "offline_id": offline_id}
 

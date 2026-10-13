@@ -12,6 +12,7 @@ import requests
 import homeassistant.util.dt as dt_util
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
@@ -49,7 +50,15 @@ from .icatypes import (
     IcaStoreOffer,
     OpenFoodFactsProduct,
 )
-from .utils import get_diff_obj, get_diffs, index_of, trim_props, try_parse_int
+from .utils import (
+    diff_list_rows,
+    get_diff_obj,
+    get_diffs,
+    index_of,
+    resolve_list_entity_ids,
+    trim_props,
+    try_parse_int,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -169,6 +178,18 @@ class IcaCoordinator(DataUpdateCoordinator[list[IcaShoppingListEntry]]):
                 self._config_entry, data=entry_data
             )
         return lists
+
+    def _list_entity_id(self, offline_id: str) -> str | None:
+        registry = er.async_get(self._hass)
+        entries = [
+            (e.unique_id, e.entity_id)
+            for e in er.async_entries_for_config_entry(
+                registry, self._config_entry.entry_id
+            )
+        ]
+        return resolve_list_entity_ids(
+            entries, self._config_entry.entry_id, [offline_id]
+        ).get(offline_id)
 
     def get_shopping_list(self, list_offline_id) -> IcaShoppingList | None:
         selected_lists = self._ica_shopping_lists.current_value() or []
@@ -606,10 +627,24 @@ class IcaCoordinator(DataUpdateCoordinator[list[IcaShoppingListEntry]]):
         #     raise ValueError("Failed to get a valid shopping list from the API")
 
         for shopping_list in updated or []:
-            old_rows = next(
-                (lst["rows"] for lst in current if lst["id"] == shopping_list["id"]),
-                [],
+            previous = next(
+                (lst for lst in current if lst["id"] == shopping_list["id"]), None
             )
+            old_rows = previous["rows"] if previous else []
+            if previous is not None:
+                # Skipped for lists seen for the first time, so initial load is silent
+                changes = diff_list_rows(old_rows, shopping_list["rows"])
+                if any(changes.values()):
+                    await self._worker.fire_or_queue_event(
+                        IcaEvents.LIST_ITEMS_CHANGED,
+                        {
+                            "entity_id": self._list_entity_id(
+                                shopping_list["offlineId"]
+                            ),
+                            "offline_id": shopping_list["offlineId"],
+                            **changes,
+                        },
+                    )
             new_rows = shopping_list["rows"]
             if diffs := get_diffs(old_rows, new_rows):
                 await self._worker.fire_or_queue_event(

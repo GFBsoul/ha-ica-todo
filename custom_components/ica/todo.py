@@ -279,6 +279,16 @@ class IcaShoppingListEntity(CoordinatorEntity[IcaCoordinator], TodoListEntity):
     def name(self):
         return f"ICA {self._attr_name}"
 
+    @property
+    def extra_state_attributes(self) -> dict[str, str | None]:
+        """Identity of the ICA list behind this entity."""
+        shopping_list = self.coordinator.get_shopping_list(self._project_id)
+        return {
+            "offline_id": self._project_id,
+            "config_entry_id": self._config_entry.entry_id,
+            "comment": (shopping_list or {}).get("commentText"),
+        }
+
     @callback
     def _handle_coordinator_update(self) -> None:
         """Handle updated data from the coordinator."""

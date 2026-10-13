@@ -132,6 +132,8 @@ class IcaServices(StrEnum):
 
 class IcaEvents(StrEnum):
     NEW_OFFERS = f"{DOMAIN}_new_offers"
+    LISTS_CHANGED = f"{DOMAIN}_lists_changed"
+    LIST_ITEMS_CHANGED = f"{DOMAIN}_list_items_changed"
 
 
 class API:
