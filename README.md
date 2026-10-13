@@ -62,13 +62,15 @@ NOTE: Currently under development and might be unstable!
 
 # Documentation
 
+> Fork of [LazyTarget/ha-ica-todo](https://github.com/LazyTarget/ha-ica-todo), credit to the upstream project.
+
 ## Overview
 
 Custom integration (`domain: ica`, cloud polling) that connects a Home Assistant instance to an ICA (Sweden) account. It exposes ICA shopping lists as `todo` entities and keeps them in sync with ICA, categorizing items, attaching offers and recipes, and firing events when new offers appear.
 
 ## Installation
 
-1. **HACS**: add `https://github.com/lazytarget/ha-ica-todo` as a custom repository (type *Integration*), install "ICA shopping list", restart Home Assistant.
+1. **HACS**: add `https://github.com/per-lennartsson/ha-ica-todo` as a custom repository (type *Integration*), install "ICA shopping list", restart Home Assistant.
    **Manual**: copy `custom_components/ica` into your HA `config/custom_components/` folder and restart.
 2. Go to *Settings → Devices & services → Add integration → ICA*.
 
@@ -87,7 +89,7 @@ Authentication tokens are stored in the config entry and refreshed automatically
 
 ## Entities
 
-- One `todo` entity per tracked shopping list. Items are categorized into ICA article groups; due dates are derived from current offers.
+- One `todo` entity per tracked shopping list. Items are categorized into ICA article groups; due dates are derived from current offers. Each list entity has the attributes `offline_id` (the list's ICA offline ID), `config_entry_id` and `comment` (the list comment in ICA, if any). The favourites entity has no such attributes.
 - `todo.ica_favorite_articles`: your ICA base items (favorites).
 
 ## Services
@@ -115,6 +117,20 @@ Example JSON row: `{"productName": "Banan", "productEan": "4011800420710", "quan
 ## Events
 
 `ica_new_offers` is fired when new offers are detected in your favorite stores. Use it as an automation trigger.
+
+`ica_lists_changed` is fired after `ica.create_shopping_list` (with `track`) or `ica.delete_shopping_list` has reloaded the integration and the todo entities are registered. Also fired immediately for an untracked create. Payload:
+
+```json
+{"config_entry_id": "...", "created": ["<offline_id>"], "deleted": [], "entities": {"<offline_id>": "todo.ica_..."}}
+```
+
+`entities` maps created offline IDs to entity IDs (missing if the reload failed or the list is not tracked).
+
+`ica_list_items_changed` is fired when a refresh finds added, removed or changed rows in a list compared with the previous data (e.g. items added in the ICA app). Not fired on the first load of a list. Payload:
+
+```json
+{"entity_id": "todo.ica_...", "offline_id": "...", "added": [{"uid": "...", "summary": "..."}], "removed": ["<uid>"], "changed": [{"uid": "...", "summary": "...", "changed_props": ["quantity"]}]}
+```
 
 ## Blueprint
 
