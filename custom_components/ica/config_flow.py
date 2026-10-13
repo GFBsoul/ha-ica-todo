@@ -227,11 +227,21 @@ class IcaOptionsFlowHandler(OptionsFlow):
             )
 
     def _build_shopping_list_selector_schema(self, lists):
+        tracked = self.config_entry.data.get(CONF_SHOPPING_LISTS, []) or []
+        if lists:
+            # Match tracked ids to the available lists case-insensitively (ICA returns
+            # upper case ids) and drop ids of lists that no longer exist
+            available = {str(x["offlineId"]).lower(): x["offlineId"] for x in lists}
+            tracked = [
+                available[str(x).lower()]
+                for x in tracked
+                if str(x).lower() in available
+            ]
         return {
             vol.Optional(
                 CONF_SHOPPING_LISTS,
                 description="The shopping lists to track",
-                default=self.config_entry.data.get(CONF_SHOPPING_LISTS, []),
+                default=tracked,
             ): selector.SelectSelector(
                 selector.SelectSelectorConfig(
                     options=[
