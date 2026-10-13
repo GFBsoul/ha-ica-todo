@@ -53,6 +53,76 @@ NOTE: Currently under development and might be unstable!
 - [ ] Service to list recipes possible with the current pantry inventory
 
 **Docs**
-- [ ] Document installation/configuration
+- [x] Document installation/configuration (see below)
 - [ ] Document use-case examples
 - [ ] Document Automation examples
+
+
+---
+
+# Documentation
+
+## Overview
+
+Custom integration (`domain: ica`, cloud polling) that connects a Home Assistant instance to an ICA (Sweden) account. It exposes ICA shopping lists as `todo` entities and keeps them in sync with ICA, categorizing items, attaching offers and recipes, and firing events when new offers appear.
+
+## Installation
+
+1. **HACS**: add `https://github.com/lazytarget/ha-ica-todo` as a custom repository (type *Integration*), install "ICA shopping list", restart Home Assistant.
+   **Manual**: copy `custom_components/ica` into your HA `config/custom_components/` folder and restart.
+2. Go to *Settings → Devices & services → Add integration → ICA*.
+
+## Configuration
+
+Set up via the UI (config flow):
+
+| Field | Description |
+|---|---|
+| Personal ID number | 10 digits, no hyphen |
+| ICA PIN code | 4-6 digits |
+| Number of random recipes | `0` deactivates |
+| JSON data in description | Optionally store raw item data in each todo item's description |
+
+Authentication tokens are stored in the config entry and refreshed automatically (re-login on expiry or HTTP 401). After setup, *Configure* (options) lets you pick which ICA shopping lists to track. Changing options invalidates the cache. Polling interval defaults to 5 minutes.
+
+## Entities
+
+- One `todo` entity per tracked shopping list. Items are categorized into ICA article groups; due dates are derived from current offers.
+- `todo.ica_favorite_articles`: your ICA base items (favorites).
+
+## Services
+
+| Service | Purpose |
+|---|---|
+| `ica.refresh_all` | Force a refresh of all cached data |
+| `ica.get_recipe` | Fetch a recipe by `recipe_id` (returns response) |
+| `ica.lookup_product` | Look up a product by barcode/EAN (returns response) |
+| `ica.get_baseitems` | List base items (favorites) for an ICA account (returns response) |
+| `ica.add_baseitem` | Add a base item by name or barcode |
+| `ica.create_shopping_list` | Create a list on an ICA account (`title`, optional `comment`; `track` adds it as a todo entity and reloads the integration) |
+| `ica.delete_shopping_list` | Permanently delete a list from your ICA account |
+| `ica.upsert_shopping_list` | Add/update `rows` (plain text or JSON objects) in a list entity |
+| `ica.add_offers_to_shopping_list` | Add offers by `offer_ids` to a list entity |
+
+`upsert_shopping_list` and `add_offers_to_shopping_list` take a `conflict_mode` for items that already exist:
+
+- `APPEND`: add as a new row (default)
+- `MERGE`: combine with the existing row, summing quantities (with unit conversion, e.g. kg/g, l/dl, defaulting to `st`) and matching on normalized product name / offline id
+- `IGNORE`: leave the existing row untouched
+
+Example JSON row: `{"productName": "Banan", "productEan": "4011800420710", "quantity": 2, "unit": "st"}`
+
+## Events
+
+`ica_new_offers` is fired when new offers are detected in your favorite stores. Use it as an automation trigger.
+
+## Blueprint
+
+`custom_components/ica/blueprints/ica_track_new_offers.yaml` triggers on `ica_new_offers`, filters by store/offer/article name, matches your favorite items (name or EAN), and can notify or add to a shopping list.
+
+## Development
+
+- Layout: `coordinator.py` (polling, caching, offer events), `todo.py` (entities + list services), `services.py` (global services), `utils.py` (merge, unit conversion, name normalization), `authenticator.py` / `icaapi*.py` (API client), `config_flow.py`.
+- Tests: `pytest tests/` (merge and product-name normalization).
+- Lint: `pre-commit run -a` (ruff, yamllint).
+- Releases: Release Drafter builds notes from PR labels; publishing a release triggers `.github/workflows/release.yaml`, which writes the version into `manifest.json` and attaches `ica.zip`.
