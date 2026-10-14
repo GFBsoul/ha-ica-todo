@@ -1,32 +1,29 @@
+import logging
 import uuid
 
+import homeassistant.helpers.config_validation as cv
+import requests
 import voluptuous as vol
-
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
-import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers import entity_registry as er
 
-from .coordinator import IcaCoordinator
 from .const import CONF_DIRTY_CACHE, CONF_SHOPPING_LISTS, DOMAIN, IcaEvents, IcaServices
-from .icatypes import IcaBaseItem, IcaRecipe, ServiceCallResponse
+from .coordinator import IcaCoordinator
+from .icatypes import IcaBaseItem, IcaProduct, IcaRecipe, ServiceCallResponse
 from .utils import build_lists_changed_event, resolve_list_entity_ids
-
-import logging
 
 _LOGGER = logging.getLogger(__name__)
 
 GET_BASEITEMS_SCHEMA = vol.Schema(
     {
-        # vol.Required("integration"): cv.string
         vol.Required("integration"): vol.All(cv.ensure_list, [cv.string]),
     }
 )
 
 ADD_BASEITEM_SCHEMA = vol.Schema(
     {
-        # vol.Required("integration"): cv.string
         vol.Required("integration"): vol.All(cv.ensure_list, [cv.string]),
         vol.Required("identifier"): cv.string,
     }
@@ -52,6 +49,59 @@ LOOKUP_PRODUCT_SCHEMA = vol.Schema(
         vol.Required("identifier"): cv.string,
     }
 )
+
+
+def _get_coordinator(hass: HomeAssistant, entry_id: str) -> IcaCoordinator:
+    """The coordinator of a loaded ICA config entry."""
+    config_entry = hass.config_entries.async_get_entry(entry_id)
+    if not config_entry or config_entry.domain != DOMAIN:
+        raise ServiceValidationError(
+            translation_domain=DOMAIN,
+            translation_key="integration_not_found",
+            translation_placeholders={"target": entry_id},
+        )
+    if config_entry.state != ConfigEntryState.LOADED:
+        raise HomeAssistantError(
+            translation_domain=DOMAIN,
+            translation_key="not_loaded",
+            translation_placeholders={"target": config_entry.title},
+        )
+    return config_entry.runtime_data
+
+
+def _get_any_coordinator(hass: HomeAssistant) -> IcaCoordinator:
+    """The coordinator of the first loaded ICA config entry."""
+    for config_entry in hass.config_entries.async_entries(DOMAIN):
+        if config_entry.state is ConfigEntryState.LOADED:
+            return config_entry.runtime_data
+    raise HomeAssistantError(
+        translation_domain=DOMAIN,
+        translation_key="not_loaded",
+        translation_placeholders={"target": DOMAIN},
+    )
+
+
+def _update_tracked_lists(
+    hass: HomeAssistant,
+    config_entry: ConfigEntry,
+    add: str | None = None,
+    remove: str | None = None,
+) -> None:
+    """Track or untrack a list. The caller reloads the entry afterwards."""
+    tracked = list(config_entry.options.get(CONF_SHOPPING_LISTS) or [])
+    # ICA returns offlineId in upper case - compare case-insensitively
+    if remove:
+        tracked = [x for x in tracked if str(x).lower() != str(remove).lower()]
+    if add and add.lower() not in [str(x).lower() for x in tracked]:
+        tracked.append(add)
+    options = {**config_entry.options, CONF_SHOPPING_LISTS: tracked}
+    # The caller reloads, so the options update itself must not trigger a reload
+    config_entry.runtime_data.applied_options = options
+    hass.config_entries.async_update_entry(
+        config_entry,
+        data={**config_entry.data, CONF_DIRTY_CACHE: True},
+        options=options,
+    )
 
 
 def _fire_lists_changed(
@@ -82,7 +132,7 @@ async def _reload_and_fire_lists_changed(
     """Reload the config entry, then signal that the todo entities are registered."""
     try:
         await hass.config_entries.async_reload(config_entry_id)
-    except Exception:  # pylint: disable=broad-except
+    except Exception:
         _LOGGER.exception("Reload of ICA config entry failed")
     # Fire regardless, so listeners are not left waiting. `entities` shows what exists.
     _fire_lists_changed(hass, config_entry_id, created, deleted)
@@ -95,17 +145,8 @@ def setup_global_services(hass: HomeAssistant) -> None:
             """Call will force the coordinator to refresh all data"""
             c = 0
             for config_entry in hass.config_entries.async_entries(DOMAIN):
-                if config_entry.state != ConfigEntryState.LOADED:
-                    raise HomeAssistantError(
-                        translation_domain=DOMAIN,
-                        translation_key="not_loaded",
-                        translation_placeholders={"target": config_entry.title},
-                    )
-                coordinator: IcaCoordinator = (
-                    config_entry.coordinator or hass.data[DOMAIN][config_entry.entry_id]
-                )
-                await coordinator.refresh_data(invalidate_cache=True)
-                coordinator.async_update_listeners()
+                coordinator = _get_coordinator(hass, config_entry.entry_id)
+                await coordinator.async_refresh_all()
                 c += 1
             return {"updated_integrations": c}
 
@@ -123,23 +164,8 @@ def setup_global_services(hass: HomeAssistant) -> None:
             call: ServiceCall,
         ) -> ServiceCallResponse[list[IcaBaseItem]]:
             """Call will query ICA api after the user's favorite items"""
-            config_entry: ConfigEntry | None
             for entry_id in call.data["integration"]:
-                if not (config_entry := hass.config_entries.async_get_entry(entry_id)):
-                    raise ServiceValidationError(
-                        translation_domain=DOMAIN,
-                        translation_key="integration_not_found",
-                        translation_placeholders={"target": DOMAIN},
-                    )
-                if config_entry.state != ConfigEntryState.LOADED:
-                    raise HomeAssistantError(
-                        translation_domain=DOMAIN,
-                        translation_key="not_loaded",
-                        translation_placeholders={"target": config_entry.title},
-                    )
-                coordinator: IcaCoordinator = (
-                    config_entry.coordinator or hass.data[DOMAIN][entry_id]
-                )
+                coordinator = _get_coordinator(hass, entry_id)
                 baseitems = await coordinator.async_get_baseitems(invalidate_cache=True)
                 return ServiceCallResponse[list[IcaBaseItem]](
                     success=bool(baseitems), data=baseitems or []
@@ -161,24 +187,14 @@ def setup_global_services(hass: HomeAssistant) -> None:
         ) -> ServiceCallResponse[list[IcaBaseItem]]:
             """Call will add item to the user's favorite items"""
             identifier = call.data["identifier"]
-            config_entry: ConfigEntry | None
             for entry_id in call.data["integration"]:
-                if not (config_entry := hass.config_entries.async_get_entry(entry_id)):
-                    raise ServiceValidationError(
-                        translation_domain=DOMAIN,
-                        translation_key="integration_not_found",
-                        translation_placeholders={"target": DOMAIN},
+                coordinator = _get_coordinator(hass, entry_id)
+                try:
+                    baseitems = await coordinator.async_lookup_and_add_baseitem(
+                        identifier
                     )
-                if config_entry.state != ConfigEntryState.LOADED:
-                    raise HomeAssistantError(
-                        translation_domain=DOMAIN,
-                        translation_key="not_loaded",
-                        translation_placeholders={"target": config_entry.title},
-                    )
-                coordinator: IcaCoordinator = (
-                    config_entry.coordinator or hass.data[DOMAIN][entry_id]
-                )
-                baseitems = await coordinator.async_lookup_and_add_baseitem(identifier)
+                except ValueError as err:
+                    raise ServiceValidationError(str(err)) from err
                 return ServiceCallResponse[list[IcaBaseItem]](
                     success=bool(baseitems), data=baseitems or []
                 )
@@ -202,29 +218,15 @@ def setup_global_services(hass: HomeAssistant) -> None:
             if not title:
                 raise ServiceValidationError("A title is required")
 
-            entry_id = call.data["integration"][0]
-            if not (config_entry := hass.config_entries.async_get_entry(entry_id)):
-                raise ServiceValidationError(
-                    translation_domain=DOMAIN,
-                    translation_key="integration_not_found",
-                    translation_placeholders={"target": DOMAIN},
-                )
-            if config_entry.state != ConfigEntryState.LOADED:
-                raise HomeAssistantError(
-                    translation_domain=DOMAIN,
-                    translation_key="not_loaded",
-                    translation_placeholders={"target": config_entry.title},
-                )
-            coordinator: IcaCoordinator = (
-                config_entry.coordinator or hass.data[DOMAIN][entry_id]
-            )
+            coordinator = _get_coordinator(hass, call.data["integration"][0])
+            config_entry = coordinator.config_entry
 
             offline_id = str(uuid.uuid4())
             try:
                 created = await coordinator.api.create_shopping_list(
                     offline_id, title, comment
                 )
-            except Exception as err:  # pylint: disable=broad-except
+            except requests.exceptions.RequestException as err:
                 _LOGGER.exception("Failed to create ICA shopping list '%s'", title)
                 raise HomeAssistantError(
                     f"Failed to create ICA shopping list '{title}': {err}"
@@ -232,22 +234,16 @@ def setup_global_services(hass: HomeAssistant) -> None:
             _LOGGER.info("Created ICA shopping list '%s' (%s)", title, offline_id)
 
             if track:
-                entry_data = config_entry.data.copy()
-                tracked = list(entry_data.get(CONF_SHOPPING_LISTS, []) or [])
                 # ICA returns offlineId in upper case - track it the same way as the entity unique_id
                 tracked_id = offline_id
                 if isinstance(created, dict) and created.get("offlineId"):
                     tracked_id = str(created["offlineId"])
-                if tracked_id.lower() not in [str(x).lower() for x in tracked]:
-                    tracked.append(tracked_id)
-                entry_data[CONF_SHOPPING_LISTS] = tracked
-                entry_data[CONF_DIRTY_CACHE] = True
-                hass.config_entries.async_update_entry(config_entry, data=entry_data)
+                _update_tracked_lists(hass, config_entry, add=tracked_id)
                 # Refresh the cached lists before reloading, since the to-do
                 # entities are created from that cache during setup.
                 try:
                     await coordinator.async_get_shopping_lists(invalidate_cache=True)
-                except Exception:  # pylint: disable=broad-except
+                except (requests.exceptions.RequestException, HomeAssistantError):
                     _LOGGER.warning(
                         "Could not refresh shopping list cache before reload",
                         exc_info=True,
@@ -297,20 +293,12 @@ def setup_global_services(hass: HomeAssistant) -> None:
                 )
             offline_id = entity.unique_id[len(prefix) :]
 
-            config_entry = hass.config_entries.async_get_entry(entity.config_entry_id)
-            if not config_entry or config_entry.state != ConfigEntryState.LOADED:
-                raise HomeAssistantError(
-                    translation_domain=DOMAIN,
-                    translation_key="not_loaded",
-                    translation_placeholders={"target": DOMAIN},
-                )
-            coordinator: IcaCoordinator = (
-                config_entry.coordinator or hass.data[DOMAIN][config_entry.entry_id]
-            )
+            coordinator = _get_coordinator(hass, entity.config_entry_id)
+            config_entry = coordinator.config_entry
 
             try:
                 await coordinator.api.delete_shopping_list(offline_id)
-            except Exception as err:  # pylint: disable=broad-except
+            except requests.exceptions.RequestException as err:
                 _LOGGER.exception("Failed to delete ICA shopping list %s", offline_id)
                 raise HomeAssistantError(
                     f"Failed to delete ICA shopping list '{entity_id}': {err}"
@@ -318,18 +306,10 @@ def setup_global_services(hass: HomeAssistant) -> None:
             _LOGGER.info("Deleted ICA shopping list %s (%s)", entity_id, offline_id)
 
             # Stop tracking the list, refresh cache, drop the entity and reload
-            entry_data = config_entry.data.copy()
-            tracked = [
-                x
-                for x in (entry_data.get(CONF_SHOPPING_LISTS, []) or [])
-                if str(x).lower() != str(offline_id).lower()  # ICA returns ids in upper case
-            ]
-            entry_data[CONF_SHOPPING_LISTS] = tracked
-            entry_data[CONF_DIRTY_CACHE] = True
-            hass.config_entries.async_update_entry(config_entry, data=entry_data)
+            _update_tracked_lists(hass, config_entry, remove=offline_id)
             try:
                 await coordinator.async_get_shopping_lists(invalidate_cache=True)
-            except Exception:  # pylint: disable=broad-except
+            except (requests.exceptions.RequestException, HomeAssistantError):
                 _LOGGER.warning(
                     "Could not refresh shopping list cache before reload",
                     exc_info=True,
@@ -354,15 +334,12 @@ def setup_global_services(hass: HomeAssistant) -> None:
 
     # Non-entity based Services
     if not hass.services.has_service(DOMAIN, IcaServices.GET_RECIPE):
+
         async def handle_get_recipe(
             call: ServiceCall,
         ) -> ServiceCallResponse[IcaRecipe]:
             """Call will query ICA api after a specific Recipe"""
-            config_entry: ConfigEntry = hass.config_entries.async_entries(DOMAIN)[0]
-            coordinator: IcaCoordinator = (
-                config_entry.coordinator or hass.data[DOMAIN][config_entry.entry_id]
-            )
-
+            coordinator = _get_any_coordinator(hass)
             recipe_id = call.data["recipe_id"]
             recipe = await coordinator.async_get_recipe(recipe_id)
             return ServiceCallResponse[IcaRecipe](success=bool(recipe), data=recipe)
@@ -375,19 +352,22 @@ def setup_global_services(hass: HomeAssistant) -> None:
             supports_response=SupportsResponse.ONLY,
         )
 
-    # Non-entity based Services
     if not hass.services.has_service(DOMAIN, IcaServices.LOOKUP_PRODUCT):
+
         async def handle_lookup_product(
             call: ServiceCall,
-        ) -> ServiceCallResponse[IcaRecipe]:
+        ) -> ServiceCallResponse[IcaProduct]:
             """Call will query local Product registry and fill in with info from OpenFoodFacts."""
-            config_entry: ConfigEntry = hass.config_entries.async_entries(DOMAIN)[0]
-            coordinator: IcaCoordinator = (
-                config_entry.coordinator or hass.data[DOMAIN][config_entry.entry_id]
+            coordinator = _get_any_coordinator(hass)
+            try:
+                product_info = await coordinator.get_product_info(
+                    call.data["identifier"]
+                )
+            except NotImplementedError as err:
+                raise ServiceValidationError(str(err)) from err
+            return ServiceCallResponse[IcaProduct](
+                success=bool(product_info), data=product_info
             )
-            identifier = call.data["identifier"]
-            product_info = await coordinator.get_product_info(identifier)
-            return ServiceCallResponse[IcaRecipe](success=bool(product_info), data=product_info)
 
         hass.services.async_register(
             DOMAIN,
