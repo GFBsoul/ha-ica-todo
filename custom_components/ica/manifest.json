@@ -2,7 +2,7 @@
   "domain": "ica",
   "name": "ICA",
   "categories": [
-    "productivity_information"
+    "productivity_information.calendars_todos"
   ],
   "codeowners": [
     "@lazytarget"
