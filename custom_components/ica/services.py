@@ -50,6 +50,12 @@ LOOKUP_PRODUCT_SCHEMA = vol.Schema(
     }
 )
 
+SEARCH_ARTICLES_SCHEMA = vol.Schema(
+    {
+        vol.Required("query"): cv.string,
+    }
+)
+
 
 def _get_coordinator(hass: HomeAssistant, entry_id: str) -> IcaCoordinator:
     """The coordinator of a loaded ICA config entry."""
@@ -374,5 +380,26 @@ def setup_global_services(hass: HomeAssistant) -> None:
             IcaServices.LOOKUP_PRODUCT,
             handle_lookup_product,
             schema=LOOKUP_PRODUCT_SCHEMA,
+            supports_response=SupportsResponse.ONLY,
+        )
+
+    if not hass.services.has_service(DOMAIN, IcaServices.SEARCH_ARTICLES):
+
+        async def handle_search_articles(call: ServiceCall):
+            """Search ICA's article database by free-text query."""
+            config_entry: ConfigEntry = hass.config_entries.async_entries(DOMAIN)[0]
+            coordinator: IcaCoordinator = (
+                config_entry.coordinator or hass.data[DOMAIN][config_entry.entry_id]
+            )
+            query = call.data["query"]
+            await coordinator.api.ensure_login()
+            results = await coordinator.api.search_articles(query)
+            return ServiceCallResponse(success=bool(results), data=results)
+
+        hass.services.async_register(
+            DOMAIN,
+            IcaServices.SEARCH_ARTICLES,
+            handle_search_articles,
+            schema=SEARCH_ARTICLES_SCHEMA,
             supports_response=SupportsResponse.ONLY,
         )

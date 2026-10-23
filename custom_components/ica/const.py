@@ -74,6 +74,7 @@ class IcaServices(StrEnum):
     GET_BASEITEMS = "get_baseitems"
     ADD_BASEITEM = "add_baseitem"
     # LOOKUP_BARCODE = "lookup_barcode"
+    SEARCH_ARTICLES = "search_articles"
     UPSERT_SHOPPING_LIST = "upsert_shopping_list"
     ADD_OFFERS_TO_SHOPPING_LIST = "add_offers_to_shopping_list"
     CREATE_SHOPPING_LIST = "create_shopping_list"
@@ -123,6 +124,11 @@ class API:
         # ProductService
         PRODUCT_BARCODE_LOOKUP_ENDPOINT: Final = (
             "sverige/digx/mobile/productservice/v1/product/{}"
+        )
+
+        # ArticleSearchService
+        ARTICLE_SEARCH_ENDPOINT: Final = (
+            "sverige/digx/shoppinglistarticlesearch/v1/search"
         )
 
 
