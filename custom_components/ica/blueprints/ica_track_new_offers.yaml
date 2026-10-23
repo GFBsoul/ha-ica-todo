@@ -8,10 +8,10 @@ blueprint:
     This automation also looks through your account's favorite items and matches names/ean(s)\n
     \n
     [See the source on GitHub:]
-    (https://github.com/per-lennartsson/ha-ica-todo/blob/main/custom_components/ica/blueprints/ica_track_new_offers.yaml)\n"
+    (https://github.com/LazyTarget/ha-ica-todo/blob/main/custom_components/ica/blueprints/ica_track_new_offers.yaml)\n"
   domain: automation
-  source_url: https://github.com/per-lennartsson/ha-ica-todo/blob/main/custom_components/ica/blueprints/ica_track_new_offers.yaml
-  author: LazyTarget, per-lennartsson
+  source_url: https://github.com/LazyTarget/ha-ica-todo/blob/main/custom_components/ica/blueprints/ica_track_new_offers.yaml
+  author: LazyTarget
   input:
     ica_integration:
       name: ICA Account

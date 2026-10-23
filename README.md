@@ -62,15 +62,13 @@ NOTE: Currently under development and might be unstable!
 
 # Documentation
 
-> Fork of [LazyTarget/ha-ica-todo](https://github.com/LazyTarget/ha-ica-todo), credit to the upstream project.
-
 ## Overview
 
 Custom integration (`domain: ica`, cloud polling) that connects a Home Assistant instance to an ICA (Sweden) account. It exposes ICA shopping lists as `todo` entities and keeps them in sync with ICA, categorizing items, attaching offers and recipes, and firing events when new offers appear.
 
 ## Installation
 
-1. **HACS**: add `https://github.com/per-lennartsson/ha-ica-todo` as a custom repository (type *Integration*), install "ICA shopping list", restart Home Assistant.
+1. **HACS**: add `https://github.com/LazyTarget/ha-ica-todo` as a custom repository (type *Integration*), install "ICA shopping list", restart Home Assistant.
    **Manual**: copy `custom_components/ica` into your HA `config/custom_components/` folder and restart.
 2. Go to *Settings → Devices & services → Add integration → ICA*.
 
