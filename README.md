@@ -81,10 +81,11 @@ Shopping list events share these fields:
 - `origin`: `ica` if the change was made outside Home Assistant (e.g. in the ICA app), `home_assistant` if made from Home Assistant
 - `product_name` and `item` (the full ICA row: `quantity`, `unit`, `isStrikedOver`, `offerId`, ...), on the per-item events
 
-Changes are detected when the integration polls ICA (every 5 minutes by default). No item events are fired the first time a list is fetched.
+Changes made in Home Assistant are sent to ICA right away. Changes made in the ICA app are picked up when the integration polls ICA (every 5 minutes by default), or right away with `ica.refresh_shopping_lists`. No item events are fired the first time a list is fetched.
 
 ### Services
 
+- `ica.refresh_shopping_lists`: fetches the tracked shopping lists from ICA right away, e.g. when arriving at the store or from a dashboard button. Much lighter than `ica.refresh_all`.
 - `ica.get_offers`: returns the currently valid offers in your favorite stores. Use `store_ids` to limit to some stores and `favorites_only: true` to only get offers matching your favorite items.
 - `ica.get_baseitems` / `ica.add_baseitem`: get or add favorite items.
 - `ica.add_offers_to_shopping_list` / `ica.upsert_shopping_list`: add offers or items to a shopping list.

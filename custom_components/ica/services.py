@@ -7,7 +7,13 @@ import homeassistant.helpers.config_validation as cv
 
 from .coordinator import IcaCoordinator
 from .const import DOMAIN, IcaServices
-from .icatypes import IcaBaseItem, IcaOfferInfo, IcaRecipe, ServiceCallResponse
+from .icatypes import (
+    IcaBaseItem,
+    IcaOfferInfo,
+    IcaRecipe,
+    IcaShoppingList,
+    ServiceCallResponse,
+)
 
 import logging
 
@@ -47,6 +53,12 @@ GET_OFFERS_SCHEMA = vol.Schema(
             cv.ensure_list, [vol.Coerce(int)]
         ),
         vol.Optional("favorites_only", default=False): cv.boolean,
+    }
+)
+
+REFRESH_SHOPPING_LISTS_SCHEMA = vol.Schema(
+    {
+        vol.Optional("integration"): cv.string,
     }
 )
 
@@ -263,4 +275,32 @@ def setup_global_services(hass: HomeAssistant) -> None:
             handle_get_offers,
             schema=GET_OFFERS_SCHEMA,
             supports_response=SupportsResponse.ONLY,
+        )
+
+    if not hass.services.has_service(DOMAIN, IcaServices.REFRESH_SHOPPING_LISTS):
+
+        async def handle_refresh_shopping_lists(
+            call: ServiceCall,
+        ) -> ServiceCallResponse[list[IcaShoppingList]]:
+            """Fetch the tracked shopping lists from ICA right away."""
+            if entry_id := call.data.get("integration"):
+                coordinators = [_get_loaded_coordinator(hass, entry_id)]
+            else:
+                coordinators = [
+                    _get_loaded_coordinator(hass, config_entry.entry_id)
+                    for config_entry in hass.config_entries.async_entries(DOMAIN)
+                ]
+            shopping_lists: list[IcaShoppingList] = []
+            for coordinator in coordinators:
+                shopping_lists.extend(await coordinator.async_refresh_shopping_lists())
+            return ServiceCallResponse[list[IcaShoppingList]](
+                success=True, data=shopping_lists
+            )
+
+        hass.services.async_register(
+            DOMAIN,
+            IcaServices.REFRESH_SHOPPING_LISTS,
+            handle_refresh_shopping_lists,
+            schema=REFRESH_SHOPPING_LISTS_SCHEMA,
+            supports_response=SupportsResponse.OPTIONAL,
         )

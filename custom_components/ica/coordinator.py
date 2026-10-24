@@ -98,6 +98,11 @@ class IcaCoordinator(DataUpdateCoordinator[list[IcaShoppingListEntry]]):
         # config_entry.async_on_unload(self._openFoodFactsSession.close)
 
         config_entry_key = self._config_entry.data[CONF_ICA_ID]
+        # Expire just before the next scheduled update, so that every update fetches
+        # fresh data. Otherwise an update can land right before expiry and skip it.
+        short_term_expiry = min(
+            CACHING_SECONDS_SHORT_TERM, max(update_interval.total_seconds() - 30, 0)
+        )
 
         self._ica_articles = CacheEntry[list[IcaArticle]](
             hass, "articles", partial(self.api.get_articles)
@@ -106,7 +111,7 @@ class IcaCoordinator(DataUpdateCoordinator[list[IcaShoppingListEntry]]):
             hass,
             f"{config_entry_key}.baseitems",
             partial(self.api.get_baseitems),
-            expiry_seconds=CACHING_SECONDS_SHORT_TERM,
+            expiry_seconds=short_term_expiry,
         )
         self._ica_current_bonus = CacheEntry[IcaAccountCurrentBonus](
             hass, f"{config_entry_key}.current_bonus", partial(self._get_current_bonus)
@@ -120,7 +125,7 @@ class IcaCoordinator(DataUpdateCoordinator[list[IcaShoppingListEntry]]):
             hass,
             f"{config_entry_key}.shopping_lists",
             partial(self._async_update_tracked_shopping_lists),
-            expiry_seconds=CACHING_SECONDS_SHORT_TERM,
+            expiry_seconds=short_term_expiry,
         )
         self._ica_offers = CacheEntry[dict[str, IcaOfferDetails]](
             hass,
@@ -184,6 +189,13 @@ class IcaCoordinator(DataUpdateCoordinator[list[IcaShoppingListEntry]]):
             # Updated Shopping list cache outside of regular `_async_update_data-loop`, inform listeners...
             self.async_update_listeners()
         return selected_lists
+
+    async def async_refresh_shopping_lists(self) -> list[IcaShoppingList]:
+        """Fetch the tracked shopping lists from ICA right away, bypassing the cache."""
+        if self.should_refresh_login():
+            new_auth_state = await self.api.ensure_login(refresh=True)
+            self._try_persist_new_state(self._config_entry, new_auth_state, None)
+        return await self.async_get_shopping_lists(invalidate_cache=True)
 
     def get_article_group(self, product_name) -> int:
         articles = self._ica_articles.current_value() or []

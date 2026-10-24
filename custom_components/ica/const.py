@@ -128,6 +128,7 @@ class IcaServices(StrEnum):
     UPSERT_SHOPPING_LIST = "upsert_shopping_list"
     ADD_OFFERS_TO_SHOPPING_LIST = "add_offers_to_shopping_list"
     GET_OFFERS = "get_offers"
+    REFRESH_SHOPPING_LISTS = "refresh_shopping_lists"
 
 
 class IcaEvents(StrEnum):
