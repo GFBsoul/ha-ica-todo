@@ -557,11 +557,9 @@ def is_offer_valid(offer: dict, now: datetime) -> bool:
     """Whether the offer is valid at the given (naive, local) time."""
     valid_from = offer.get("validFrom")
     valid_to = offer.get("validTo")
-    if valid_from and datetime.fromisoformat(valid_from) > now:
-        return False
-    if valid_to and datetime.fromisoformat(valid_to) < now:
-        return False
-    return True
+    started = not valid_from or datetime.fromisoformat(valid_from) <= now
+    ended = bool(valid_to) and datetime.fromisoformat(valid_to) < now
+    return started and not ended
 
 
 if __name__ == "__main__":
