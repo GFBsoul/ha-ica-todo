@@ -98,6 +98,24 @@
           }
         }
       },
+      "get_offers": {
+        "name": "Get offers",
+        "description": "Gets the currently valid offers in the favorite stores",
+        "fields": {
+          "integration": {
+            "name": "ICA Account",
+            "description": "The ICA account to get offers for. Defaults to the first account"
+          },
+          "store_ids": {
+            "name": "Store ids",
+            "description": "Only include offers valid in these stores. Leave empty for all favorite stores"
+          },
+          "favorites_only": {
+            "name": "Favorites only",
+            "description": "Only include offers that match the account's favorite items"
+          }
+        }
+      },
       "new_task": {
         "name": "New task",
         "description": "Creates a new task and add it to a project.",
@@ -147,6 +165,14 @@
             "description": "When should user be reminded of this task, in format YYYY-MM-DDTHH:MM:SS, in UTC timezone."
           }
         }
+      }
+    },
+    "exceptions": {
+      "integration_not_found": {
+        "message": "No loaded {target} integration was found"
+      },
+      "not_loaded": {
+        "message": "The ICA account {target} is not loaded"
       }
     }
   }

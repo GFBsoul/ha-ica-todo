@@ -7,7 +7,7 @@ import homeassistant.helpers.config_validation as cv
 
 from .coordinator import IcaCoordinator
 from .const import DOMAIN, IcaServices
-from .icatypes import IcaBaseItem, IcaRecipe, ServiceCallResponse
+from .icatypes import IcaBaseItem, IcaOfferInfo, IcaRecipe, ServiceCallResponse
 
 import logging
 
@@ -39,6 +39,39 @@ SEARCH_ARTICLES_SCHEMA = vol.Schema(
         vol.Required("query"): cv.string,
     }
 )
+
+GET_OFFERS_SCHEMA = vol.Schema(
+    {
+        vol.Optional("integration"): cv.string,
+        vol.Optional("store_ids", default=[]): vol.All(
+            cv.ensure_list, [vol.Coerce(int)]
+        ),
+        vol.Optional("favorites_only", default=False): cv.boolean,
+    }
+)
+
+
+def _get_loaded_coordinator(
+    hass: HomeAssistant, entry_id: str | None = None
+) -> IcaCoordinator:
+    """Return the coordinator of the given config entry, or of the first one."""
+    if entry_id:
+        config_entry = hass.config_entries.async_get_entry(entry_id)
+    else:
+        config_entry = next(iter(hass.config_entries.async_entries(DOMAIN)), None)
+    if not config_entry or config_entry.domain != DOMAIN:
+        raise ServiceValidationError(
+            translation_domain=DOMAIN,
+            translation_key="integration_not_found",
+            translation_placeholders={"target": DOMAIN},
+        )
+    if config_entry.state != ConfigEntryState.LOADED:
+        raise HomeAssistantError(
+            translation_domain=DOMAIN,
+            translation_key="not_loaded",
+            translation_placeholders={"target": config_entry.title},
+        )
+    return config_entry.coordinator or hass.data[DOMAIN][config_entry.entry_id]
 
 
 def setup_global_services(hass: HomeAssistant) -> None:
@@ -208,5 +241,26 @@ def setup_global_services(hass: HomeAssistant) -> None:
             IcaServices.SEARCH_ARTICLES,
             handle_search_articles,
             schema=SEARCH_ARTICLES_SCHEMA,
+            supports_response=SupportsResponse.ONLY,
+        )
+
+    if not hass.services.has_service(DOMAIN, IcaServices.GET_OFFERS):
+
+        async def handle_get_offers(
+            call: ServiceCall,
+        ) -> ServiceCallResponse[list[IcaOfferInfo]]:
+            """Return the currently valid offers, optionally filtered."""
+            coordinator = _get_loaded_coordinator(hass, call.data.get("integration"))
+            offers = await coordinator.async_get_offers(
+                store_ids=call.data["store_ids"],
+                favorites_only=call.data["favorites_only"],
+            )
+            return ServiceCallResponse[list[IcaOfferInfo]](success=True, data=offers)
+
+        hass.services.async_register(
+            DOMAIN,
+            IcaServices.GET_OFFERS,
+            handle_get_offers,
+            schema=GET_OFFERS_SCHEMA,
             supports_response=SupportsResponse.ONLY,
         )
