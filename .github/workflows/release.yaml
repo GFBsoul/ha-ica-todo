@@ -5,6 +5,9 @@ on:
   release:
     types: [published]
 
+permissions:
+  contents: write
+
 jobs:
   release_zip_file:
     name: Prepare release asset
@@ -13,8 +16,35 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      # The release-asset action commits the new version to main and pushes
+      # it, which is rejected when main has moved past the release tag. Only
+      # use it when the tag is the tip of main.
+      - name: Check if release is at the tip of main
+        id: at_main
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          git fetch --quiet origin "$DEFAULT_BRANCH"
+          if [ "$(git rev-parse HEAD)" = "$(git rev-parse "origin/$DEFAULT_BRANCH")" ]; then
+            echo "at_main=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "at_main=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Release is not at the tip of $DEFAULT_BRANCH, the version is only set in the release asset"
+          fi
+
       - name: Release Asset
+        if: steps.at_main.outputs.at_main == 'true'
         uses: "rogerselwyn/actions/release-asset@main"
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           component: "ica"
+
+      - name: Release Asset (local manifest only)
+        if: steps.at_main.outputs.at_main != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          python3 .github/scripts/update_hacs_manifest.py --version "$TAG"
+          (cd custom_components/ica && zip -qr "$GITHUB_WORKSPACE/ica.zip" .)
+          gh release upload "$TAG" ica.zip --clobber
