@@ -4,6 +4,17 @@ name: Release
 on:
   release:
     types: [published]
+  # Package an existing tag with this workflow, e.g. a tag that is behind main
+  # (a `release` event runs the workflow file as of the tag instead).
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to build and attach ica.zip for"
+        required: true
+        type: string
+
+permissions:
+  contents: write
 
 jobs:
   release_zip_file:
@@ -12,9 +23,45 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          # Empty on a release event, which checks out the release tag anyway
+          ref: ${{ inputs.tag }}
+
+      # The release-asset action commits the new version to main and pushes
+      # it, which is rejected when main has moved past the release tag. Only
+      # use it when the tag is the tip of main.
+      - name: Check if release is at the tip of main
+        id: at_main
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          git fetch --quiet origin "$DEFAULT_BRANCH"
+          # The release-asset action only understands release events
+          if [ "$EVENT_NAME" = release ] &&
+            [ "$(git rev-parse HEAD)" = "$(git rev-parse "origin/$DEFAULT_BRANCH")" ]; then
+            echo "at_main=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "at_main=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Release is not at the tip of $DEFAULT_BRANCH, the version is only set in the release asset"
+          fi
 
       - name: Release Asset
+        if: steps.at_main.outputs.at_main == 'true'
         uses: "rogerselwyn/actions/release-asset@main"
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           component: "ica"
+
+      - name: Release Asset (local manifest only)
+        if: steps.at_main.outputs.at_main != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: |
+          python3 .github/scripts/update_hacs_manifest.py --version "$TAG"
+          (cd custom_components/ica && zip -qr "$GITHUB_WORKSPACE/ica.zip" .)
+          # Releases created with GITHUB_TOKEN do not trigger new workflow runs
+          gh release view "$TAG" > /dev/null 2>&1 ||
+            gh release create "$TAG" --verify-tag --title "$TAG" --generate-notes
+          gh release upload "$TAG" ica.zip --clobber
