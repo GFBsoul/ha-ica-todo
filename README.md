@@ -160,6 +160,19 @@ Example JSON row: `{"productName": "Banan", "productEan": "4011800420710", "quan
 - `item` is the full ICA row (`quantity`, `unit`, `isStrikedOver`, `offerId`, ...), without the offer details that the todo entity adds.
 - Changes made in the ICA app are picked up when the integration polls ICA (every 5 minutes by default), or right away with `ica.refresh_shopping_lists`.
 
+#### Events per item
+
+Turn on *Events per item* in the integration options to also get one event for every row, besides `ica_list_items_changed`. It is off by default, as a change to many rows (e.g. a whole recipe) then fires many events.
+
+| Event | Fired when |
+|---|---|
+| `ica_shopping_list_item_added` | An item is added to a tracked list |
+| `ica_shopping_list_item_removed` | An item is removed |
+| `ica_shopping_list_item_completed` | An item is checked off |
+| `ica_shopping_list_item_reopened` | A checked off item is unchecked |
+
+Payload: `config_entry_id`, `entity_id`, `offline_id`, `shopping_list_name`, `origin` (as above), `product_name` and `item` (the full ICA row).
+
 ### Examples
 
 Notify when someone adds an item from the ICA app:

@@ -39,11 +39,13 @@
         "data": {
           "scan_interval": "Uppdateringsintervall (minuter)",
           "json_data_in_desc": "JSON-data i beskrivningen",
+          "per_item_events": "Händelser per rad",
           "shopping_lists": "Inköpslistor"
         },
         "data_description": {
           "scan_interval": "Hur ofta data hämtas från ICA",
           "json_data_in_desc": "Visa extra data (mängd, erbjudande, EAN, ...) som JSON i varje varas beskrivning",
+          "per_item_events": "Skicka även en händelse för varje tillagd, borttagen, avbockad och ombockad rad, utöver den samlade händelsen ica_list_items_changed",
           "shopping_lists": "Inköpslistorna som ska visas som att göra-listor"
         }
       }

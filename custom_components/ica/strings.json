@@ -39,11 +39,13 @@
         "data": {
           "scan_interval": "Update interval (minutes)",
           "json_data_in_desc": "JSON data in description",
+          "per_item_events": "Events per item",
           "shopping_lists": "Shopping lists"
         },
         "data_description": {
           "scan_interval": "How often to fetch data from ICA",
           "json_data_in_desc": "Show extra item data (quantity, offer, EAN, ...) as JSON in each item's description",
+          "per_item_events": "Also fire an event for every added, removed, checked off and unchecked item, besides the combined ica_list_items_changed event",
           "shopping_lists": "The shopping lists to track as to-do lists"
         }
       }

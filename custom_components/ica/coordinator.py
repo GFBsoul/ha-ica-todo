@@ -24,9 +24,11 @@ from .const import (
     CACHING_SECONDS_SHORT_TERM,
     CONF_DIRTY_CACHE,
     CONF_ICA_ID,
+    CONF_PER_ITEM_EVENTS,
     CONF_SHOPPING_LISTS,
     DEFAULT_ARTICLE_GROUP_ID,
     DOMAIN,
+    PER_ITEM_EVENTS,
     ConflictMode,
     IcaEventOrigin,
     IcaEvents,
@@ -683,17 +685,29 @@ class IcaCoordinator(DataUpdateCoordinator[IcaCoordinatorData]):
         if not any(changes.values()):
             return
         offline_id = shopping_list["offlineId"]
+        base_data = {
+            "config_entry_id": self.config_entry.entry_id,
+            "entity_id": self._list_entity_id(offline_id),
+            "offline_id": offline_id,
+            "shopping_list_name": shopping_list["title"],
+            "origin": origin,
+        }
         await self._worker.fire_or_queue_event(
-            IcaEvents.LIST_ITEMS_CHANGED,
-            {
-                "config_entry_id": self.config_entry.entry_id,
-                "entity_id": self._list_entity_id(offline_id),
-                "offline_id": offline_id,
-                "shopping_list_name": shopping_list["title"],
-                "origin": origin,
-                **changes,
-            },
+            IcaEvents.LIST_ITEMS_CHANGED, {**base_data, **changes}
         )
+        if not self.config_entry.options.get(CONF_PER_ITEM_EVENTS, False):
+            return
+        # Opt-in: also one event per row, for automations that react per item
+        for change, event_type in PER_ITEM_EVENTS.items():
+            for entry in changes[change]:
+                await self._worker.fire_or_queue_event(
+                    event_type,
+                    {
+                        **base_data,
+                        "product_name": entry["summary"],
+                        "item": entry["item"],
+                    },
+                )
 
     async def async_get_offers(
         self, store_ids: list[int] | None = None, favorites_only: bool = False
