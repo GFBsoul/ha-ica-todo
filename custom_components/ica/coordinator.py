@@ -242,10 +242,14 @@ class IcaCoordinator(DataUpdateCoordinator[IcaCoordinatorData]):
                 return x.get("parentId") or DEFAULT_ARTICLE_GROUP_ID
         return DEFAULT_ARTICLE_GROUP_ID  # Unspecified
 
+    _UNITS = "st|förp|kg|hg|g|l|dl|cl|ml|msk|tsk|krm"
     _SUMMARY_RE = re.compile(
         r"^(?:(?P<min_quantity>\d+(?:[.,]\d+)?)\s*[-–]\s*)?"
-        r"(?P<quantity>\d+(?:[.,]\d+)?)\s*"
-        r"(?:(?P<unit>st|förp|kg|hg|g|l|dl|cl|ml|msk|tsk|krm)(?=\s|$))?\s*"
+        r"(?P<quantity>\d+(?:[.,]\d+)?)"
+        # The quantity must be followed by whitespace or a unit ('500g mjöl'),
+        # so names like '7up', '3-pack' or '100% juice' are left alone. A unit
+        # only counts as a whole word, and not when it is all there is.
+        rf"(?:\s*(?P<unit>{_UNITS})(?=\s)\s*|\s+(?!(?:{_UNITS})\s*$))"
         r"(?P<name>.*\S)\s*$",
         re.IGNORECASE,
     )

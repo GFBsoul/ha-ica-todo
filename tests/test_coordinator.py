@@ -165,3 +165,46 @@ def test_parse_aware_datetime():
     assert parse_aware_datetime("2024-06-30T21:59:59Z").tzinfo == dt.UTC
     assert parse_aware_datetime(None) is None
     assert parse_aware_datetime("not a date") is None
+
+
+@pytest.mark.parametrize(
+    ("summary", "name", "quantity", "unit"),
+    [
+        ("2 st Gurka", "Gurka", 2, "st"),
+        ("1 gurka", "gurka", 1, None),
+        ("500g mjöl", "mjöl", 500, "g"),
+        ("1,5 l Mjölk", "Mjölk", 1.5, "l"),
+        ("2-3 gurka", "gurka", 3, None),
+        ("2 gula lökar", "gula lökar", 2, None),
+        ("7 up", "up", 7, None),
+    ],
+)
+async def test_parse_summary_quantity(
+    hass, loaded_entry, summary, name, quantity, unit
+):
+    ti = loaded_entry.runtime_data.parse_summary(summary)
+    assert ti["productName"] == name
+    assert ti["quantity"] == quantity
+    assert ti.get("unit") == unit
+
+
+@pytest.mark.parametrize(
+    "summary",
+    [
+        "7up",
+        "100% juice",
+        "2x Gurka",
+        "7-Eleven",
+        "3-pack toapapper",
+        "5:2 yoghurt",
+        "500 g",
+        "Mjölk",
+    ],
+)
+async def test_parse_summary_keeps_names_that_start_with_a_digit(
+    hass, loaded_entry, summary
+):
+    ti = loaded_entry.runtime_data.parse_summary(summary)
+    assert ti["productName"] == summary
+    assert ti["summary"] == summary
+    assert "quantity" not in ti
