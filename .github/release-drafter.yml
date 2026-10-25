@@ -109,6 +109,6 @@ autolabeler:
     title:
       - '/^refactor:/i'
 template: |
-  ## What's changed?
+  # What's changed?
 
   $CHANGES
