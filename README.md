@@ -16,8 +16,8 @@ NOTE: Currently under development and might be unstable!
 **Integration**
 - [x] Shopping list picker for which lists to track
 - [x] Implement services and events to use for automations (notifications, etc.)
-- [ ] Translate strings [se, en]
-- [ ] Implement config flows step for Reauth / refresh tokens
+- [x] Translate strings [sv, en]
+- [x] Implement config flows step for Reauth / refresh tokens
 - [x] Update config entry with token, if doing full auth
 - [x] Refresh login when expiry was passed
 - [x] Refresh login when 401 was returned during fetching of data
@@ -32,7 +32,7 @@ NOTE: Currently under development and might be unstable!
 - [ ] Adding items to a shopping list  should sync them to Trello checklist too?
 - [ ] User should use the "store"-list when shopping, which should contain existing offers for that store, and the wanted items from "Master"-list
 - [ ] Adding items to the "Master"-list should calculate the sum of quantities and update accordingly
-- [ ] Implement the different `CONFLICT_MODES`
+- [x] Implement the different `CONFLICT_MODES`
 - [ ] Allow for (scheduled) notification, when favorite item(s) are on discount/offer
 - [ ] Avoid getting all shopping lists before updating individual lists. Since integration has config on the ID's. Only fetch during config_flow
 - [ ] Check if the 'Ica To-Go app' can be reverse engineered. That way we could possibly scan ONCE, for both for ICA purchase and for Grocy tracking.
@@ -53,46 +53,112 @@ NOTE: Currently under development and might be unstable!
 - [ ] Service to list recipes possible with the current pantry inventory
 
 **Docs**
-- [ ] Document installation/configuration
+- [x] Document installation/configuration (see below)
 - [ ] Document use-case examples
 - [ ] Document Automation examples
 
 
-## Automations
+---
 
-### Events
+# Documentation
 
-All events include `config_entry_id`, so automations can tell ICA accounts apart.
+## Overview
 
-| Event | Fired when | Data |
-|---|---|---|
-| `ica_shopping_list_item_added` | An item is added to a tracked shopping list | see below |
-| `ica_shopping_list_item_completed` | An item is checked off | see below |
-| `ica_shopping_list_item_reopened` | A checked off item is unchecked | see below |
-| `ica_shopping_list_item_removed` | An item is removed | see below |
-| `ica_shopping_list_changed` | Once per sync with changes, summarizing them | `added`, `completed`, `reopened`, `removed` (lists of rows) plus the shared fields below |
-| `ica_favorite_offers` | New offers match one of your favorite items | `offer_ids`, `offers` |
-| `ica_new_offers` | New offers are found in your favorite stores | `new_offers` |
+Custom integration (`domain: ica`, cloud polling) that connects a Home Assistant instance to an ICA (Sweden) account. It exposes ICA shopping lists as `todo` entities and keeps them in sync with ICA, categorizing items, attaching offers and recipes, and firing events when new offers appear.
 
-Shopping list events share these fields:
+## Installation
 
-- `entity_id`: the To-do entity of the list, e.g. `todo.ica_handla`
-- `shopping_list_id`, `shopping_list_name`
-- `origin`: `ica` if the change was made outside Home Assistant (e.g. in the ICA app), `home_assistant` if made from Home Assistant
-- `product_name` and `item` (the full ICA row: `quantity`, `unit`, `isStrikedOver`, `offerId`, ...), on the per-item events
+1. **HACS**: add `https://github.com/LazyTarget/ha-ica-todo` as a custom repository (type *Integration*), install "ICA shopping list", restart Home Assistant.
+   **Manual**: copy `custom_components/ica` into your HA `config/custom_components/` folder and restart.
+2. Go to *Settings → Devices & services → Add integration → ICA*.
 
-Changes made in Home Assistant are sent to ICA right away. Changes made in the ICA app are picked up when the integration polls ICA (every 5 minutes by default), or right away with `ica.refresh_shopping_lists`. No item events are fired the first time a list is fetched.
+## Configuration
 
-### Services
+Set up via the UI (config flow):
 
-- `ica.refresh_shopping_lists`: fetches the tracked shopping lists from ICA right away, e.g. when arriving at the store or from a dashboard button. Much lighter than `ica.refresh_all`.
-- `ica.get_offers`: returns the currently valid offers in your favorite stores. Use `store_ids` to limit to some stores and `favorites_only: true` to only get offers matching your favorite items.
-- `ica.get_baseitems` / `ica.add_baseitem`: get or add favorite items.
-- `ica.add_offers_to_shopping_list` / `ica.upsert_shopping_list`: add offers or items to a shopping list.
-- `ica.lookup_product`, `ica.search_articles`, `ica.get_recipe`: lookups.
-- `ica.refresh_all`: force a refresh of all data.
+| Field | Description |
+|---|---|
+| Personal ID number | 10 or 12 digits, no hyphen |
+| ICA PIN code | 4-6 digits |
+| Update interval | Minutes between fetches from ICA (default 5) |
 
-To read the items of a list, use Home Assistant's built-in `todo.get_items`.
+Authentication tokens are stored in the config entry and refreshed automatically (re-login on expiry or HTTP 401). If the login stops working (e.g. a changed PIN), Home Assistant shows a *Reconfigure* notice where you enter the new PIN.
+
+After setup, *Configure* (options) lets you change:
+
+| Option | Description |
+|---|---|
+| Update interval | Minutes between fetches from ICA |
+| JSON data in description | Show extra item data (quantity, offer, EAN, ...) as JSON in each item's description |
+| Shopping lists | Which ICA shopping lists to track as to-do lists |
+
+Saving the options reloads the integration; changing the tracked lists also refetches them.
+
+Cached ICA data is stored in `.storage/ica.*.json` and is deleted when the integration is removed. Neither the cache file names nor the logs contain your personal ID number, PIN or tokens.
+
+## Entities
+
+All entities belong to one *ICA* device per account.
+
+- One `todo` entity per tracked shopping list. Items are categorized into ICA article groups; due dates are derived from current offers. Each list entity has the attributes `offline_id` (the list's ICA offline ID), `config_entry_id` and `comment` (the list comment in ICA, if any). The favourites entity has no such attributes.
+- `todo.ica_favorite_articles`: your ICA base items (favorites).
+
+## Services
+
+| Service | Purpose |
+|---|---|
+| `ica.refresh_all` | Force a refresh of all cached data |
+| `ica.refresh_shopping_lists` | Fetch the tracked lists from ICA right away (optionally for one `integration`), e.g. to pick up changes made in the ICA app when arriving at the store. Much lighter than `ica.refresh_all` (returns response, optional) |
+| `ica.get_offers` | Currently valid offers in the favorite stores, optionally for one `integration`, some `store_ids`, or `favorites_only` (returns response) |
+| `ica.get_recipe` | Fetch a recipe by `recipe_id` (returns response) |
+| `ica.lookup_product` | Look up a product by barcode/EAN (returns response) |
+| `ica.get_baseitems` | List base items (favorites) for an ICA account (returns response) |
+| `ica.add_baseitem` | Add a base item by name or barcode |
+| `ica.create_shopping_list` | Create a list on an ICA account (`title`, optional `comment`; `track` adds it as a todo entity and reloads the integration) |
+| `ica.delete_shopping_list` | Permanently delete a list from your ICA account |
+| `ica.upsert_shopping_list` | Add/update `rows` (plain text or JSON objects) in a list entity |
+| `ica.add_offers_to_shopping_list` | Add offers by `offer_ids` to a list entity |
+
+`upsert_shopping_list` and `add_offers_to_shopping_list` take a `conflict_mode` for items that already exist:
+
+- `APPEND`: add as a new row (default)
+- `MERGE`: combine with the existing row, summing quantities (with unit conversion, e.g. kg/g, l/dl, defaulting to `st`) and matching on normalized product name / offline id
+- `IGNORE`: leave the existing row untouched
+
+Example JSON row: `{"productName": "Banan", "productEan": "4011800420710", "quantity": 2, "unit": "st"}`
+
+## Events
+
+`ica_new_offers` is fired when new offers are detected in your favorite stores. Use it as an automation trigger.
+
+`ica_favorite_offers` is fired together with it when new offers match one of your favorite items (base items). Matching is by EAN (ignoring leading zeros), or by name for favorites without an EAN (plural forms are normalized). Payload: `config_entry_id`, `offer_ids` and `offers`.
+
+`ica_lists_changed` is fired after `ica.create_shopping_list` (with `track`) or `ica.delete_shopping_list` has reloaded the integration and the todo entities are registered. Also fired immediately for an untracked create. Payload:
+
+```json
+{"config_entry_id": "...", "created": ["<offline_id>"], "deleted": [], "entities": {"<offline_id>": "todo.ica_..."}}
+```
+
+`entities` maps created offline IDs to entity IDs (missing if the reload failed or the list is not tracked).
+
+`ica_list_items_changed` is fired when the rows of a tracked list differ from the previous data. Not fired the first time a list is fetched, as every row would count as added. Payload:
+
+```json
+{
+  "config_entry_id": "...", "entity_id": "todo.ica_...", "offline_id": "...",
+  "shopping_list_name": "...", "origin": "ica",
+  "added": [{"uid": "...", "summary": "Mjölk", "item": {"...": "full ICA row"}}],
+  "removed": [{"uid": "...", "summary": "Mjölk", "item": {}}],
+  "changed": [{"uid": "...", "summary": "Mjölk", "changed_props": ["quantity"], "item": {}}],
+  "completed": [{"uid": "...", "summary": "Mjölk", "item": {}}],
+  "reopened": []
+}
+```
+
+- `origin` is `ica` when the change was made outside Home Assistant (e.g. in the ICA app, found when polling) and `home_assistant` when it was made from Home Assistant (found when the sync response updates the cache). Use it to react only to changes made in the app, without reacting to your own changes.
+- `completed` and `reopened` are the rows that were checked off or unchecked. They are also listed in `changed`.
+- `item` is the full ICA row (`quantity`, `unit`, `isStrikedOver`, `offerId`, ...), without the offer details that the todo entity adds.
+- Changes made in the ICA app are picked up when the integration polls ICA (every 5 minutes by default), or right away with `ica.refresh_shopping_lists`.
 
 ### Examples
 
@@ -101,13 +167,17 @@ Notify when someone adds an item from the ICA app:
 ```yaml
 triggers:
   - trigger: event
-    event_type: ica_shopping_list_item_added
+    event_type: ica_list_items_changed
     event_data:
       origin: ica
+conditions:
+  - "{{ trigger.event.data.added | count > 0 }}"
 actions:
   - action: notify.mobile_app_my_phone
     data:
-      message: "{{ trigger.event.data.product_name }} added to {{ trigger.event.data.shopping_list_name }}"
+      message: >
+        {{ trigger.event.data.added | map(attribute='summary') | join(', ') }}
+        added to {{ trigger.event.data.shopping_list_name }}
 ```
 
 Notify when your favorite items go on offer:
@@ -148,3 +218,25 @@ actions:
 ```
 
 See also the blueprint [ica_track_new_offers.yaml](custom_components/ica/blueprints/ica_track_new_offers.yaml) for adding matching offers to a shopping list.
+
+## Upgrading from v0.9.0 or earlier
+
+The config entry is migrated automatically on first start:
+
+- Update interval, tracked lists and the JSON description setting move to the options.
+- Cache files are renamed so they no longer contain your personal ID number, and debug dumps (`ica.offers_changed*`, `ica.products_changed*`) are deleted.
+- Entities are grouped under an *ICA* device. Existing entity IDs are kept.
+
+Requires Home Assistant 2025.1 or later.
+
+## Blueprint
+
+`custom_components/ica/blueprints/ica_track_new_offers.yaml` triggers on `ica_new_offers`, filters by store/offer/article name, matches your favorite items (name or EAN), and can notify or add to a shopping list.
+
+## Development
+
+- Layout: `coordinator.py` (polling, caching, offer events), `todo.py` (entities + list services), `services.py` (global services), `utils.py` (merge, unit conversion, name normalization, timestamps), `caching.py` (file cache), `authenticator.py` / `icaapi*.py` / `http_requests.py` (ICA API client), `openfoodfacts.py`, `config_flow.py` (setup, reauth, options).
+- Setup: `python3.13 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt`
+- Tests: `.venv/bin/pytest` (config/options/reauth flows, migration, entities, services, coordinator, cache and the `utils` helpers; the ICA API is faked in `tests/conftest.py`). CI runs them on every PR.
+- Lint: `pre-commit run -a` (ruff check + format, yamllint).
+- Releases: Release Drafter builds notes from PR labels; publishing a release triggers `.github/workflows/release.yaml`, which writes the version into `manifest.json` and attaches `ica.zip`.

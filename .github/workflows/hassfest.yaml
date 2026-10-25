@@ -15,5 +15,11 @@ jobs:
     steps:
       - uses: "actions/checkout@v4"
 
+      # Pinned to the last image that was used before this repo went idle
+      # (hassfest 2026.4.4, built 2026-04-24). The home-assistant/actions
+      # action runs a floating image, which now rejects `categories` in
+      # custom integration manifests it does not know about.
       - name: "hassfest validation"
-        uses: home-assistant/actions/hassfest@master
+        run: >-
+          docker run --rm -v "${{ github.workspace }}://github/workspace"
+          ghcr.io/home-assistant/hassfest@sha256:c5d2ee400ab9dc5091302fd95c87de73e1224db17d0f2c9c9802401247e4db2d

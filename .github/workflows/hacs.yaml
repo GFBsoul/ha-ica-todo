@@ -15,7 +15,21 @@ jobs:
     steps:
       - uses: "actions/checkout@v4"
 
+      # Pinned to the last image that was used before this repo went idle
+      # (built 2026-03-09). hacs/action runs the floating `:main` image.
       - name: HACS validation
-        uses: "hacs/action@main"
-        with:
-          category: "integration"
+        env:
+          INPUT_CATEGORY: "integration"
+          INPUT_IGNORE: ""
+          INPUT_COMMENT: "true"
+          INPUT_GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          docker run --rm
+          -v "${{ github.workspace }}://github/workspace"
+          -e INPUT_CATEGORY -e INPUT_IGNORE -e INPUT_COMMENT -e INPUT_GITHUB_TOKEN
+          -e GITHUB_ACTIONS -e GITHUB_REPOSITORY -e GITHUB_EVENT_NAME
+          -e GITHUB_EVENT_PATH=/github/workflow/event.json -e GITHUB_WORKSPACE=/github/workspace
+          -e GITHUB_REF -e GITHUB_SHA -e GITHUB_SERVER_URL -e GITHUB_API_URL
+          -e GITHUB_RUN_ID -e GITHUB_RUN_NUMBER -e GITHUB_ACTOR -e GITHUB_BASE_REF -e GITHUB_HEAD_REF
+          -v "$GITHUB_EVENT_PATH:/github/workflow/event.json"
+          ghcr.io/hacs/action@sha256:b66c72824f330bb10141a1deaa4e09b097283312cce3f55d097237e73d86c868
