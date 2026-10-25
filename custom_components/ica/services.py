@@ -387,10 +387,7 @@ def setup_global_services(hass: HomeAssistant) -> None:
 
         async def handle_search_articles(call: ServiceCall):
             """Search ICA's article database by free-text query."""
-            config_entry: ConfigEntry = hass.config_entries.async_entries(DOMAIN)[0]
-            coordinator: IcaCoordinator = (
-                config_entry.coordinator or hass.data[DOMAIN][config_entry.entry_id]
-            )
+            coordinator = _get_any_coordinator(hass)
             query = call.data["query"]
             await coordinator.api.ensure_login()
             results = await coordinator.api.search_articles(query)
