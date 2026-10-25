@@ -143,7 +143,7 @@ Example JSON row: `{"productName": "Banan", "productEan": "4011800420710", "quan
 {"entity_id": "todo.ica_...", "offline_id": "...", "added": [{"uid": "...", "summary": "..."}], "removed": ["<uid>"], "changed": [{"uid": "...", "summary": "...", "changed_props": ["quantity"]}]}
 ```
 
-## Upgrading from v0.10 or earlier
+## Upgrading from v0.9.0 or earlier
 
 The config entry is migrated automatically on first start:
 
